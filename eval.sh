@@ -13,8 +13,7 @@ batch_size=16
 for ds in "${dataset_list[@]}"
 do
   echo Evaluate dataset: "${ds}"
-  python test.py --light_use_mask --light_element 27 \
-   --gpu_ids ${GPUS} \
+  CUDA_VISIBLE_DEVICES=${GPUS} python test.py --light_use_mask --light_element 27 \
    --name ${name} \
    --model ${model} \
    --dataset_mode ${dataset_mode} \

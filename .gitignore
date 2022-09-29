@@ -5,3 +5,5 @@ results/*
 */__pycache__/*
 tensorboard/*
 __pycache__/*
+train.sh
+eval.sh
