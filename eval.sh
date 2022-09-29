@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-GPUS=-1
+GPUS=0
 model=ht
 name=FCHT_2H9L_allihd
 
