@@ -122,6 +122,7 @@ class BaseOptions():
         parser.add_argument('--NUM_SHARDS', type=int, default=1, help='NUM_SHARDS')
         parser.add_argument('--DIST_BACKEND', type=str, default='nccl', help='DIST_BACKEND')
         parser.add_argument('--RNG_SEED', type=int, default=1, help='NUM_SHARDS')
+        parser.add_argument('--tensorboard_dir', type=str, default='./tensorboard', help='tensorboard path')
 
         self.initialized = True
         return parser

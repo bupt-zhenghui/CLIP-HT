@@ -34,8 +34,7 @@ class BaseModel(ABC):
         self.opt = opt
         self.NUM_GPUS = opt.NUM_GPUS
         self.isTrain = opt.isTrain
-        cur_device = torch.cuda.current_device()
-        self.device = torch.device(cur_device) if torch.cuda.is_available() else torch.device(
+        self.device = torch.device(torch.cuda.current_device()) if torch.cuda.is_available() else torch.device(
             'cpu')  # get device name: CPU or GPU
 
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)  # save all the checkpoints to save_dir

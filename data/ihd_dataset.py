@@ -11,7 +11,6 @@ You need to implement the following functions:
     -- <__getitem__>: Return a data point and its metadata information.
     -- <__len__>: Return the number of images.
 """
-import os.path
 
 import numpy as np
 import torch
@@ -20,6 +19,7 @@ import torchvision.transforms.functional as tf
 from PIL import Image
 
 from data.base_dataset import BaseDataset
+from util import scripts
 
 
 class IhdDataset(BaseDataset):
@@ -58,22 +58,7 @@ class IhdDataset(BaseDataset):
         self.isTrain = opt.isTrain
         self.image_size = opt.crop_size
 
-        if opt.isTrain == True:
-            # self.real_ext='.jpg'
-            print('loading training file')
-            self.trainfile = opt.dataset_root + opt.dataset_name + '_train.txt'
-            with open(self.trainfile, 'r') as f:
-                for line in f.readlines():
-                    self.image_paths.append(os.path.join(opt.dataset_root, 'composite_images', line.rstrip()))
-        elif opt.isTrain == False:
-            # self.real_ext='.jpg'
-            print('loading test file')
-            self.trainfile = opt.dataset_root + opt.dataset_name + '_test.txt'
-            with open(self.trainfile, 'r') as f:
-                for line in f.readlines():
-                    self.image_paths.append(os.path.join(opt.dataset_root, 'composite_images', line.rstrip()))
-                    # print(line.rstrip())
-        # get the image paths of your dataset;
+        self.image_paths = scripts.get_ihd_training_data(opt.dataset_name, opt.dataset_root, self.isTrain)
         # You can call sorted(make_dataset(self.root, opt.max_dataset_size)) to get all the image paths under the directory self.root
         # define the default transform function. You can use <base_dataset.get_transform>; You can also define your custom transform function
         transform_list = [

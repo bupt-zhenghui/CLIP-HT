@@ -1,3 +1,4 @@
+import datetime
 import os
 import time
 from collections import OrderedDict
@@ -7,12 +8,14 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+from tensorboardX import SummaryWriter
 
 from data import create_dataset
 from data import shuffle_dataset
 from models import create_model
 from util import distributed as du
 from util import html, util
+from util.evaluation import evaluation
 from util.visualizer import Visualizer
 from util.visualizer import save_images
 
@@ -23,6 +26,9 @@ def train(cfg):
     # Set random seed from configs.
     np.random.seed(cfg.RNG_SEED)
     torch.manual_seed(cfg.RNG_SEED)
+
+    date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")[2:]
+    writer = SummaryWriter(logdir=os.path.join(cfg.tensorboard_dir, date + '-' + cfg.name))
 
     # init dataset
     dataset = create_dataset(cfg)  # create a dataset given cfg.dataset_mode and other options
@@ -46,6 +52,7 @@ def train(cfg):
             iter_data_time = time.time()  # timer for data loading per iteration
         epoch_iter = 0  # the number of training iterations in current epoch, reset to 0 every epoch
         shuffle_dataset(dataset, epoch)
+        losses = None
         for i, data in enumerate(dataset):  # inner loop within one epoch
             if is_master:
                 iter_start_time = time.time()  # timer for computation per iteration
@@ -88,9 +95,15 @@ def train(cfg):
             print('End of epoch %d / %d \t Time Taken: %d sec' % (
                 epoch, cfg.niter + cfg.niter_decay, time.time() - epoch_start_time))
         model.update_learning_rate()  # update learning rates at the end of every epoch.
+        for k, v in losses.items():
+            writer.add_scalar(f'data/loss_{k}', v, epoch)
+        writer.close()
 
 
 def test(cfg):
+    date = datetime.datetime.now().strftime("%Y%m%d")[2:]
+    writer = SummaryWriter(logdir=os.path.join(cfg.tensorboard_dir, date + '-' + cfg.name))
+
     dataset = create_dataset(cfg)  # create a dataset given cfg.dataset_mode and other options
     postion_embedding = util.PositionEmbeddingSine(cfg)
     patch_pos = util.PatchPositionEmbeddingSine(cfg)
@@ -134,6 +147,37 @@ def test(cfg):
             img_path_one.append(img_path[j])
             save_images(webpage, visuals_ones, img_path_one, aspect_ratio=cfg.aspect_ratio, width=cfg.display_winsize)
             num_image += 1
+            raw_name = img_path[j].split('/')[-1]
+
+            mse_score, fmse_score, score_str = evaluation(raw_name, visuals_ones['harmonized'] * 256,
+                                                          visuals_ones['real'] * 256, visuals_ones['mask'])
+            # print(score_str)
+            fmse_score_list.append(score_str)
+            mse_scores += mse_score
+            fmse_scores += fmse_score
             visuals_ones.clear()
 
     webpage.save()  # save the HTML
+    mse_mu = mse_scores / num_image
+    fmse_mu = fmse_scores / num_image
+    mean_score = "%s MSE %0.2f | fMSE %0.2f" % (cfg.dataset_name, mse_mu, fmse_mu)
+    print(mean_score)
+
+    dataset_list = ['ihd', 'HAdobe5k', 'HCOCO', 'HFlickr', 'Hday2night']
+    writer.add_text('eval/metrics', mean_score, dataset_list.index(cfg.dataset_name))
+    writer.close()
+
+    fmse_score_list = sorted(fmse_score_list, key=lambda image: image[1], reverse=True)
+    save_fmse_root = os.path.join(cfg.results_dir, cfg.name)
+    # save_fmse_root = cfg.result_save_path[0:-19]
+    save_fmse_path = os.path.join(save_fmse_root, "evaluation_detail_" + cfg.test_epoch + ".txt")
+
+    file = open(save_fmse_path, 'w')
+    file.write(str(num_image))
+    file.write('\n')
+    file.write(mean_score)
+    file.write('\n')
+    # lists=[str(line)+"\n" for line in fmse_score_list]
+    for line in fmse_score_list:
+        file.write(str(line) + "\n")
+    file.close()
