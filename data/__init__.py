@@ -73,7 +73,7 @@ def create_dataset(opt):
         drop_last = True
     elif opt.isTrain == False:
         shuffle = False
-        drop_last = False
+        drop_last = True
 
     sampler = torch.utils.data.distributed.DistributedSampler(dataset) if opt.NUM_GPUS > 1 else None
 
