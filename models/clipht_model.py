@@ -5,10 +5,10 @@ from . import harmony_networks as networks
 from .base_model import BaseModel
 
 
-class HTModel(BaseModel):
+class CLIPHTModel(BaseModel):
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
-        parser.set_defaults(norm='instance', netG='HT', dataset_mode='ihd')
+        parser.set_defaults(norm='instance', netG='CLIPHT', dataset_mode='mmihd')
         if is_train:
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
         return parser
@@ -25,12 +25,20 @@ class HTModel(BaseModel):
         self.opt.device = self.device
         self.netG = networks.define_G(opt.netG, opt.init_type, opt.init_gain, self.opt)
 
-        print(self.netG)
+        # print(self.netG)
 
         if self.isTrain:
             util.saveprint(self.opt, 'netG', str(self.netG))
             # define loss functions
             self.criterionL1 = torch.nn.L1Loss()
+
+            # Code below is normal without learning rate problem.
+            if torch.cuda.is_available():
+                for param in self.netG.module.clip_generator.parameters():
+                    param.requires_grad = False
+            else:
+                for param in self.netG.clip_generator.parameters():
+                    param.requires_grad = False
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
 
@@ -52,8 +60,9 @@ class HTModel(BaseModel):
         self.inputs = input['inputs'].to(self.device)
         self.mask = input['mask'].to(self.device)
         self.image_paths = input['img_path']
-
         self.revert_mask = 1 - self.mask
+        self.fg = input['fg'].to(self.device)
+        self.comp_feat = input['comp_feat'].to(self.device)
 
     def data_dependent_initialize(self, data):
         """
@@ -66,7 +75,7 @@ class HTModel(BaseModel):
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        self.harmonized = self.netG(inputs=self.inputs, pixel_pos=self.input_pos)
+        self.harmonized = self.netG(inputs=self.inputs, pixel_pos=self.input_pos, fg=self.fg, comp_feat=self.comp_feat)
         if not self.isTrain:
             self.harmonized = self.comp * self.revert_mask + self.harmonized * self.mask
 

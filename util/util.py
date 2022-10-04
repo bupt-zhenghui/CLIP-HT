@@ -3,9 +3,7 @@ from __future__ import print_function
 
 import matplotlib.font_manager as fm  # to create font
 import numpy
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 # from PIL import Image
 from PIL import ImageDraw, ImageFont
 
@@ -679,7 +677,7 @@ def PositionEmbeddingSine(opt):
     #     x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
     dim_t = torch.arange(num_pos_feats, dtype=torch.float32)
-    dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+    dim_t = temperature ** (2 * torch.div(dim_t, 2, rounding_mode='floor') / num_pos_feats)
 
     pos_x = x_embed[:, :, None] / dim_t
     pos_y = y_embed[:, :, None] / dim_t
@@ -702,7 +700,7 @@ def PatchPositionEmbeddingSine(opt):
     #     x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
     dim_t = torch.arange(num_pos_feats, dtype=torch.float32)
-    dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+    dim_t = temperature ** (2 * torch.div(dim_t, 2, rounding_mode='floor') / num_pos_feats)
 
     pos_x = x_embed[:, :, None] / dim_t
     pos_y = y_embed[:, :, None] / dim_t

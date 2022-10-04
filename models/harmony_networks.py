@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
+import clip
 from . import base_networks as networks_init
 from . import transformer
 
@@ -18,6 +19,10 @@ def define_G(netG='retinex', init_type='normal', init_gain=0.02, opt=None):
         net = HTGenerator(opt)
     elif netG == 'DHT':
         net = DHTGenerator(opt)
+    elif netG == 'CLIPHT':
+        net = CLIPHTGenerator(opt)
+    elif netG == 'CLIPDHT':
+        net = CLIPDHTGenerator(opt)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     net = networks_init.init_weights(net, init_type, init_gain)
@@ -45,6 +50,39 @@ class HTGenerator(nn.Module):
     def forward(self, inputs, pixel_pos=None):
         patch_embedding = self.patch_to_embedding(inputs)
         content = self.transformer_enc(patch_embedding.permute(1, 0, 2), src_pos=pixel_pos)
+        bs, L, C = patch_embedding.size()
+        harmonized = self.dec(content.permute(1, 2, 0).view(bs, C, int(math.sqrt(L)), int(math.sqrt(L))))
+        return harmonized
+
+
+class CLIPHTGenerator(nn.Module):
+    def __init__(self, opt=None):
+        super(CLIPHTGenerator, self).__init__()
+        dim = 256
+        self.clip_generator = ClipFeature()
+        self.patch_to_embedding = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=opt.ksize, p2=opt.ksize),
+            nn.Linear(opt.ksize * opt.ksize * (opt.input_nc + 1), dim)
+        )
+        # self.transformer_enc = transformer.TransformerEncoders(dim, nhead=opt.tr_r_enc_head,
+        #                                                        num_encoder_layers=opt.tr_r_enc_layers,
+        #                                                        dim_feedforward=dim * opt.dim_forward,
+        #                                                        activation=opt.tr_act)
+
+        self.transformer_enc = transformer.TransformerDecoders(dim, nhead=opt.tr_i_dec_head,
+                                                               num_decoder_layers=opt.tr_i_dec_layers,
+                                                               dim_feedforward=dim * opt.dim_forward,
+                                                               activation=opt.tr_act)
+
+        self.dec = nn.Sequential(
+            nn.ConvTranspose2d(dim, opt.output_nc, kernel_size=opt.ksize, stride=opt.ksize, padding=0),
+            nn.Tanh()
+        )
+
+    def forward(self, inputs, pixel_pos=None, fg=None, comp_feat=None):
+        clip_feature = self.clip_generator(fg, comp_feat)
+        patch_embedding = self.patch_to_embedding(inputs)
+        content = self.transformer_enc(clip_feature, patch_embedding.permute(1, 0, 2), src_pos=None, tgt_pos=pixel_pos)
         bs, L, C = patch_embedding.size()
         harmonized = self.dec(content.permute(1, 2, 0).view(bs, C, int(math.sqrt(L)), int(math.sqrt(L))))
         return harmonized
@@ -125,6 +163,93 @@ class DHTGenerator(nn.Module):
 
         harmonized = reflectance * illumination
         return harmonized, reflectance, illumination
+
+
+class CLIPDHTGenerator(nn.Module):
+    def __init__(self, opt=None):
+        super(CLIPDHTGenerator, self).__init__()
+        self.reflectance_dim = 256
+        self.device = opt.device
+
+        self.clip_generator = ClipFeature()
+
+        self.reflectance_enc = ContentEncoder(opt.n_downsample, 0, opt.input_nc + 1, self.reflectance_dim, opt.ngf,
+                                              'in', opt.activ, pad_type=opt.pad_type)
+        self.reflectance_dec = ContentDecoder(opt.n_downsample, 0, self.reflectance_enc.output_dim, opt.output_nc,
+                                              opt.ngf, 'ln', opt.activ, pad_type=opt.pad_type)
+
+        # self.reflectance_transformer_enc = transformer.TransformerEncoders(self.reflectance_dim,
+        #                                                                    nhead=opt.tr_r_enc_head,
+        #                                                                    num_encoder_layers=opt.tr_r_enc_layers,
+        #                                                                    dim_feedforward=self.reflectance_dim * opt.dim_forward,
+        #                                                                    activation=opt.tr_act)
+
+        self.reflectance_transformer_dec = transformer.TransformerDecoders(self.reflectance_dim,
+                                                                           nhead=opt.tr_i_dec_head,
+                                                                           num_decoder_layers=opt.tr_i_dec_layers,
+                                                                           dim_feedforward=self.reflectance_dim * opt.dim_forward,
+                                                                           activation=opt.tr_act)
+
+        self.light_generator = GlobalLighting(light_element=opt.light_element, light_mlp_dim=self.reflectance_dim,
+                                              opt=opt)
+        self.illumination_render = transformer.TransformerDecoders(self.reflectance_dim, nhead=opt.tr_i_dec_head,
+                                                                   num_decoder_layers=opt.tr_i_dec_layers,
+                                                                   dim_feedforward=self.reflectance_dim * opt.dim_forward,
+                                                                   activation=opt.tr_act)
+        self.illumination_dec = ContentDecoder(opt.n_downsample, 0, self.reflectance_dim, opt.output_nc, opt.ngf, 'ln',
+                                               opt.activ, pad_type=opt.pad_type)
+        self.opt = opt
+
+    def forward(self, inputs=None, image=None, pixel_pos=None, patch_pos=None, mask_r=None, mask=None,
+                fg=None, comp_feat=None, layers=[], encode_only=False):
+        fg_feature = self.clip_generator(fg, comp_feat)
+        r_content = self.reflectance_enc(inputs)
+        bs, c, h, w = r_content.size()
+        r_content = r_content.flatten(2).permute(2, 0, 1)
+
+        reflectance = self.reflectance_transformer_dec(fg_feature, r_content, src_pos=None,
+                                                       tgt_pos=pixel_pos, src_key_padding_mask=None,
+                                                       tgt_key_padding_mask=None)
+
+        light_code, light_embed = self.light_generator(image, pos=patch_pos, mask=mask,
+                                                       use_mask=self.opt.light_use_mask)
+
+        illumination = self.illumination_render(light_code, reflectance, src_pos=light_embed,
+                                                tgt_pos=pixel_pos, src_key_padding_mask=None, tgt_key_padding_mask=None)
+
+        reflectance = reflectance.permute(1, 2, 0).view(bs, c, h, w)
+        reflectance = self.reflectance_dec(reflectance)
+        reflectance = reflectance / 2 + 0.5
+
+        illumination = illumination.permute(1, 2, 0).view(bs, c, h, w)
+        illumination = self.illumination_dec(illumination)
+        illumination = illumination / 2 + 0.5
+
+        harmonized = reflectance * illumination
+        return harmonized, reflectance, illumination
+
+
+class ClipFeature(nn.Module):
+    def __init__(self, light_element=50, dim=256):
+        super(ClipFeature, self).__init__()
+        self.clip_model, _ = clip.load("ViT-B/32", jit=False)
+        self.clip_linear = nn.Sequential(
+            nn.Linear(512, dim),
+            nn.ReLU()
+        )
+        self.clip_embed = nn.Embedding(light_element, dim)
+
+    def forward(self, fg_img, comp_feat):
+        self.clip_model.eval()
+        fg_feature = self.clip_model.encode_image(fg_img)
+        fg_feature = self.clip_linear(fg_feature.float()).permute(1, 0, 2)
+
+        # print('comp_feat shape:', comp_feat.shape)
+        comp_feature = self.clip_model.encode_image(comp_feat)
+        comp_feature = self.clip_linear(comp_feature.float().permute(1, 0, 2))
+
+        fg_feature = torch.cat([fg_feature, comp_feature], 0)
+        return fg_feature
 
 
 class GlobalLighting(nn.Module):
