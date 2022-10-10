@@ -32,13 +32,6 @@ class CLIPHTModel(BaseModel):
             # define loss functions
             self.criterionL1 = torch.nn.L1Loss()
 
-            # Code below is normal without learning rate problem.
-            if torch.cuda.is_available():
-                for param in self.netG.module.clip_generator.parameters():
-                    param.requires_grad = False
-            else:
-                for param in self.netG.clip_generator.parameters():
-                    param.requires_grad = False
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
 

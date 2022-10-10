@@ -237,10 +237,10 @@ class ClipFeature(nn.Module):
             nn.Linear(512, dim),
             nn.ReLU()
         )
-        self.clip_embed = nn.Embedding(light_element, dim)
+        for _, param in self.clip_model.named_parameters():
+            param.requires_grad = False
 
     def forward(self, fg_img, comp_feat):
-        self.clip_model.eval()
         fg_feature = self.clip_model.encode_image(fg_img)
         fg_feature = self.clip_linear(fg_feature.float()).permute(1, 0, 2)
 

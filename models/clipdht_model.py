@@ -40,26 +40,6 @@ class CLIPDHTModel(BaseModel):
             self.criterionL2 = torch.nn.MSELoss()
 
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
-            def get_group_parameters():
-                params = list(self.netG.named_parameters())
-                clip_param = [p for n, p in params if 'clip_model' in n]
-                base_param = [p for n, p in params if 'clip_model' not in n]
-
-                param_group = [
-                    {'params': clip_param, 'lr': 0.0001 * opt.lr},
-                    {'params': base_param, 'lr': opt.lr},
-                ]
-                return param_group
-
-            # self.optimizer_G = torch.optim.Adam(get_group_parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-
-            # Code below is normal without learning rate problem.
-            if torch.cuda.is_available():
-                for param in self.netG.module.clip_generator.parameters():
-                    param.requires_grad = False
-            else:
-                for param in self.netG.clip_generator.parameters():
-                    param.requires_grad = False
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
 
