@@ -27,9 +27,6 @@ def train(cfg):
     np.random.seed(cfg.RNG_SEED)
     torch.manual_seed(cfg.RNG_SEED)
 
-    date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")[2:]
-    writer = SummaryWriter(logdir=os.path.join(cfg.tensorboard_dir, date + '-' + cfg.name))
-
     # init dataset
     dataset = create_dataset(cfg)  # create a dataset given cfg.dataset_mode and other options
     dataset_size = len(dataset)  # get the number of images in the dataset.
@@ -44,6 +41,11 @@ def train(cfg):
     total_iters = 0  # the total number of training iterations
     # cur_device = torch.cuda.current_device()
     is_master = du.is_master_proc(cfg.NUM_GPUS)
+
+    writer = None
+    if is_master:
+        date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")[2:]
+        writer = SummaryWriter(logdir=os.path.join(cfg.tensorboard_dir, date + '-' + cfg.name))
 
     for epoch in range(cfg.epoch_count,
                        cfg.niter + cfg.niter_decay + 1):  # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
@@ -94,10 +96,12 @@ def train(cfg):
         if is_master:
             print('End of epoch %d / %d \t Time Taken: %d sec' % (
                 epoch, cfg.niter + cfg.niter_decay, time.time() - epoch_start_time))
+
+            for k, v in losses.items():
+                writer.add_scalar(f'data/loss_{k}', v, epoch)
+            writer.close()
+
         model.update_learning_rate()  # update learning rates at the end of every epoch.
-        for k, v in losses.items():
-            writer.add_scalar(f'data/loss_{k}', v, epoch)
-        writer.close()
 
 
 def test(cfg):
