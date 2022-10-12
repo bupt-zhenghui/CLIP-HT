@@ -81,9 +81,9 @@ class MMIhdDataset(BaseDataset):
         # mask = util.retry_load_images(mask_path)
         # real = util.retry_load_images(target_path)
 
-        comp = Image.open(path).convert('RGB')
-        real = Image.open(target_path).convert('RGB')
-        mask = Image.open(mask_path).convert('1')
+        comp = Image.open(path).convert('RGB').resize((self.image_size, self.image_size))
+        real = Image.open(target_path).convert('RGB').resize((self.image_size, self.image_size))
+        mask = Image.open(mask_path).convert('1').resize((self.image_size, self.image_size))
 
         fg = scripts.crop_foreground(comp, mask)
         fg_feature = self.preprocess(fg)
