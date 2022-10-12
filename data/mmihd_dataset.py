@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 import torchvision.transforms as transforms
@@ -70,6 +72,7 @@ class MMIhdDataset(BaseDataset):
         Step 3: convert your data to a PyTorch tensor. You can use helpder functions such as self.transform. e.g., data = self.transform(image)
         Step 4: return a data point as a dictionary.
         """
+        start_time = time.time()
         path = self.image_paths[index]
         name_parts = path.split('_')
         mask_path = self.image_paths[index].replace('composite_images', 'masks')
@@ -108,6 +111,7 @@ class MMIhdDataset(BaseDataset):
         # inputs=torch.cat([real,mask],0)
         inputs = torch.cat([comp, mask], 0)
 
+        print(f'dataloader spent: {round(time.time() - start_time, 3)} sec')
         return {'inputs': inputs, 'comp': comp, 'real': real,
                 'img_path': path, 'mask': mask,
                 'fg': fg_feature, 'comp_feat': comp_feature}

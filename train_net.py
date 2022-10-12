@@ -54,6 +54,7 @@ def train(cfg):
         shuffle_dataset(dataset, epoch)
         losses = None
         for i, data in enumerate(dataset):  # inner loop within one epoch
+            iter_begin = time.time()
             if is_master:
                 iter_start_time = time.time()  # timer for computation per iteration
                 if total_iters % cfg.print_freq == 0:
@@ -85,6 +86,8 @@ def train(cfg):
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
                 save_suffix = 'iter_%d' % total_iters if cfg.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
+
+            print(f'iter time spent: {round(time.time() - iter_begin, 3)} sec')
 
         if epoch % cfg.save_epoch_freq == 0 and is_master:  # cache our model every <save_epoch_freq> epochs
             print('saving the model at the end of epoch %d, iters %d' % (epoch, total_iters))
