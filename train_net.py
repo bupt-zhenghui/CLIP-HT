@@ -13,6 +13,7 @@ from tensorboardX import SummaryWriter
 from data import create_dataset
 from data import shuffle_dataset
 from models import create_model
+from options.test_options import TestOptions
 from util import distributed as du
 from util import html, util
 from util.evaluation import evaluation
@@ -45,6 +46,7 @@ def train(cfg):
     # cur_device = torch.cuda.current_device()
     is_master = du.is_master_proc(cfg.NUM_GPUS)
 
+    best_mse, best_fmse = 10000, 10000
     for epoch in range(cfg.epoch_count,
                        cfg.niter + cfg.niter_decay + 1):  # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
         if is_master:
@@ -91,6 +93,12 @@ def train(cfg):
             model.save_networks('latest')
             if cfg.save_iter_model and epoch >= 55:
                 model.save_networks(epoch)
+
+            cur_mse, cur_fmse = eval(cfg.name, cfg.model, cfg.mode, cfg.dataset_root)
+            if cur_mse < best_mse and cur_fmse < best_fmse:
+                best_mse, best_fmse = cur_mse, cur_fmse
+                model.save_networks('best')
+
         if is_master:
             print('End of epoch %d / %d \t Time Taken: %d sec' % (
                 epoch, cfg.niter + cfg.niter_decay, time.time() - epoch_start_time))
@@ -98,6 +106,7 @@ def train(cfg):
         for k, v in losses.items():
             writer.add_scalar(f'data/loss_{k}', v, epoch)
         writer.close()
+        print(f'Best result in HCOCO: MSE {best_mse} | fMSE {best_fmse}')
 
 
 def test(cfg):
@@ -181,3 +190,67 @@ def test(cfg):
     for line in fmse_score_list:
         file.write(str(line) + "\n")
     file.close()
+
+
+def eval(name, model, mode, root):
+    cfg = TestOptions().parse()  # get training options
+    cfg.NUM_GPUS = 1
+    cfg.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
+    cfg.no_flip = True  # no flip; comment this line if results on flipped images are needed.
+    cfg.display_id = -1  # no visdom display; the test code saves the results to a HTML file.
+    cfg.phase = 'test'
+    cfg.batch_size = 8
+    cfg.name = name
+    cfg.dataset_name = 'HCOCO'
+    cfg.dataset_mode = mode
+    cfg.model = model
+    cfg.dataset_root = root
+
+    dataset = create_dataset(cfg)  # create a dataset given cfg.dataset_mode and other options
+    postion_embedding = util.PositionEmbeddingSine(cfg)
+    patch_pos = util.PatchPositionEmbeddingSine(cfg)
+    model = create_model(cfg)  # create a model given cfg.model and other options
+    model.set_position(postion_embedding, patch_pos=patch_pos)
+    model.setup(cfg)  # regular setup: load and print networks; create schedulers
+
+    if cfg.eval:
+        model.eval()
+    ismaster = du.is_master_proc(cfg.NUM_GPUS)
+
+    fmse_score_list = []
+    mse_scores = 0
+    fmse_scores = 0
+    num_image = 0
+    for i, data in enumerate(dataset):
+        model.set_input(data)  # unpack data from data loader
+        model.test()  # run inference
+        visuals = model.get_current_visuals()  # get image results
+
+        img_path = model.get_image_paths()  # get image paths # Added by Mia
+        if i % 5 == 0 and ismaster:  # save images to an HTML file
+            print('processing (%04d)-th image... %s' % (i, img_path))
+        visuals_ones = OrderedDict()
+        harmonized = None
+        real = None
+        for j in range(len(img_path)):
+            img_path_one = []
+            for label, im_data in visuals.items():
+                visuals_ones[label] = im_data[j:j + 1, :, :, :]
+            img_path_one.append(img_path[j])
+            num_image += 1
+            raw_name = img_path[j].split('/')[-1]
+
+            mse_score, fmse_score, score_str = evaluation(raw_name, visuals_ones['harmonized'] * 256,
+                                                          visuals_ones['real'] * 256, visuals_ones['mask'])
+            # print(score_str)
+            fmse_score_list.append(score_str)
+            mse_scores += mse_score
+            fmse_scores += fmse_score
+            visuals_ones.clear()
+
+    mse_mu = mse_scores / num_image
+    fmse_mu = fmse_scores / num_image
+    mean_score = "%s MSE %0.2f | fMSE %0.2f" % (cfg.dataset_name, mse_mu, fmse_mu)
+    print(mean_score)
+
+    return mse_mu, fmse_mu
