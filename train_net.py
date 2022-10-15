@@ -105,6 +105,7 @@ def train(cfg):
         model.update_learning_rate()  # update learning rates at the end of every epoch.
         for k, v in losses.items():
             writer.add_scalar(f'data/loss_{k}', v, epoch)
+    if is_master:
         writer.close()
         print(f'Best result in HCOCO: MSE {best_mse} | fMSE {best_fmse}')
 
