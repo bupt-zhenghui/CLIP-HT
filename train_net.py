@@ -28,9 +28,6 @@ def train(cfg):
     np.random.seed(cfg.RNG_SEED)
     torch.manual_seed(cfg.RNG_SEED)
 
-    date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")[2:]
-    writer = SummaryWriter(logdir=os.path.join(cfg.tensorboard_dir, date + '-' + cfg.name))
-
     # init dataset
     dataset = create_dataset(cfg)  # create a dataset given cfg.dataset_mode and other options
     dataset_size = len(dataset)  # get the number of images in the dataset.
@@ -45,6 +42,11 @@ def train(cfg):
     total_iters = 0  # the total number of training iterations
     # cur_device = torch.cuda.current_device()
     is_master = du.is_master_proc(cfg.NUM_GPUS)
+
+    writer = None
+    if is_master:
+        date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")[2:]
+        writer = SummaryWriter(logdir=os.path.join(cfg.tensorboard_dir, date + '-' + cfg.name))
 
     best_mse, best_fmse = 10000, 10000
     for epoch in range(cfg.epoch_count,
@@ -94,17 +96,21 @@ def train(cfg):
             if cfg.save_iter_model and epoch >= 55:
                 model.save_networks(epoch)
 
+        if is_master:
+            print('End of epoch %d / %d \t Time Taken: %d sec' % (
+                epoch, cfg.niter + cfg.niter_decay, time.time() - epoch_start_time))
+
+            print('Evaluating...')
             cur_mse, cur_fmse = eval(cfg.name, cfg.model, cfg.dataset_mode, cfg.dataset_root)
             if cur_mse < best_mse and cur_fmse < best_fmse:
                 best_mse, best_fmse = cur_mse, cur_fmse
                 model.save_networks('best')
 
-        if is_master:
-            print('End of epoch %d / %d \t Time Taken: %d sec' % (
-                epoch, cfg.niter + cfg.niter_decay, time.time() - epoch_start_time))
+            for k, v in losses.items():
+                writer.add_scalar(f'data/loss_{k}', v, epoch)
+
         model.update_learning_rate()  # update learning rates at the end of every epoch.
-        for k, v in losses.items():
-            writer.add_scalar(f'data/loss_{k}', v, epoch)
+
     if is_master:
         writer.close()
         print(f'Best result in HCOCO: MSE {best_mse} | fMSE {best_fmse}')
