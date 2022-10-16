@@ -94,7 +94,7 @@ def train(cfg):
             if cfg.save_iter_model and epoch >= 55:
                 model.save_networks(epoch)
 
-            cur_mse, cur_fmse = eval(cfg.name, cfg.model, cfg.mode, cfg.dataset_root)
+            cur_mse, cur_fmse = eval(cfg.name, cfg.model, cfg.dataset_mode, cfg.dataset_root)
             if cur_mse < best_mse and cur_fmse < best_fmse:
                 best_mse, best_fmse = cur_mse, cur_fmse
                 model.save_networks('best')
